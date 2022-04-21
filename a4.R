@@ -9,10 +9,10 @@ library(esquisse)
 library(dplyr)
 library(AER)
 library(panelr)
-
+getwd()
 # Exercise 1 Preparing the Data
-dat_A4 <- read_csv("Desktop/ECON 613/a4/dat_A4.csv")
-dat_A4_panel <- read_csv("Desktop/ECON 613/a4/dat_A4_panel.csv")
+dat_A4 <- read_csv("/Users/jennyzhou/Desktop/ECON 613/a4/dat_A4.csv")
+dat_A4_panel <- read_csv("/Users/jennyzhou/Desktop/ECON 613/a4/dat_A4_panel.csv")
 drop1 <- which(dat_A4$CV_HGC_BIO_DAD_1997 == 95)
 drop2 <- which(dat_A4$CV_HGC_BIO_MOM_1997 == 95)
 drop3 <- which(dat_A4$CV_HGC_RES_DAD_1997 == 95)
@@ -28,7 +28,17 @@ dat_A4 <- dat_A4 %>%
          work_exp = rowSums(dat_A4[,18:28], na.rm=TRUE) / 48)
 # (b)
 dat_A4 <- dat_A4 %>%
-  mutate(education = rowSums(dat_A4[,8:11], na.rm=TRUE) / 4)
+  mutate(parent_edu = rowSums(dat_A4[,8:11], na.rm=TRUE) / 4,
+         highest_degree = case_when(YSCH.3113_2019 == 1 ~ "<12",
+                                    YSCH.3113_2019 == 2 ~ "~12",
+                                    YSCH.3113_2019 == 3 ~ "12",
+                                    YSCH.3113_2019 == 4 ~ "14",
+                                    YSCH.3113_2019 == 5 ~ "16",
+                                    YSCH.3113_2019 == 6 ~ "18",
+                                    YSCH.3113_2019 == 7 ~ "21",
+                                    YSCH.3113_2019 == 8 ~ "21"), na.rm=TRUE)
+dat_A4$highest_degree <- as.numeric(dat_A4$highest_degree, na.rm=TRUE)
+
 # (c)
 income_data <- dat_A4 %>% 
   filter(YINC_1700_2019 != '0' & YINC_1700_2019 != 'NA')
@@ -58,6 +68,7 @@ female_data <- income_data %>%
 ggplot(female_data) +
   aes(x = YINC_1700_2019) +
   geom_histogram(bins = 30L, fill = "#112446") +
+  labs(x = "Female Income Distribution") +
   theme_minimal()
 
 # Number of children
@@ -80,24 +91,23 @@ table <- dat_A4 %>%
 
 # Exercise 2 Heckman Selection Model
 # (a)
-OLS_reg <- lm(YINC_1700_2019 ~ age + work_exp + education + KEY_SEX_1997, CV_MARSTAT_COLLAPSED_2019, data = income_data)
+OLS_reg <- lm(YINC_1700_2019 ~ age + work_exp + parent_edu + KEY_SEX_1997, CV_MARSTAT_COLLAPSED_2019, data = income_data)
 summary(OLS_reg) 
 # There might be a selection problem because we rule out all the 0s and NAs in the dataset.
 
 # (b)
-
 # (c)
 dat_A4 <- dat_A4 %>% mutate(Intercept = 1, Income_or_not = 0) 
 dat_A4$Income_or_not[which(dat_A4$YINC_1700_2019 > 0)] <- 1
 x1 = dat_A4$Intercept
 x2 = dat_A4$age
 x3 = dat_A4$work_exp
-x4 = dat_A4$education
+x4 = dat_A4$parent_edu
 x5 = dat_A4$KEY_SEX_1997
 x6 = dat_A4$CV_MARSTAT_COLLAPSED_2019
 # Probit Function
 flike = function(par,x1,x2,x3,x4,x5,x6,Income_or_not){
-  yhat = par[1]*x1 + par[2]*x2 + par[3]*x3 + par[4]*x4 + par[5]*x5 
+  yhat = par[1]*x1 + par[2]*x2 + par[3]*x3 + par[4]*x4 + par[5]*x5
   prob = pnorm(yhat)
   prob[prob>0.999999] = 0.999999
   prob[prob<0.000001] = 0.000001
@@ -106,19 +116,14 @@ flike = function(par,x1,x2,x3,x4,x5,x6,Income_or_not){
 }
 
 predict <- function(par,x1,x2,x3,x4,x5,x6,Income_or_not){
-  yhat = par[1]*x1 + par[2]*x2 + par[3]*x3 + par[4]*x4 + par[5]*x5 
+  yhat = par[1]*x1 + par[2]*x2 + par[3]*x3 + par[4]*x4 + par[5]*x5
   return(yhat)
 }
 Income_or_not = dat_A4$Income_or_not
-start <- runif(6, -0.5, 0.5)
+start <- runif(7, -1, 1)
 result  <- optim(start, fn = flike, method="BFGS", control = list(trace = 6, REPORT = 1, maxit = 1000),
-              x1 = x1, x2 = x2, x3 = x3, x4 = x4, x5 = x5, x6 = x6, Income_or_not = dat_A4$Income_or_not, hessian = TRUE)
+                 x1 = x1, x2 = x2, x3 = x3, x4 = x4, x5 = x5, x6 = x6, Income_or_not = Income_or_not, hessian = TRUE)
 result$par
- 
-# Use the Probit package to check the result
-reg_package <- glm(Income_or_not ~ x2 + x3 + x3 + x4 + x5 + x6, family = binomial(link = "probit"))
-summary(reg_package)
-reg_package$coefficients
 
 predictor <- predict(result$par,x1,x2,x3,x4,x5,x6,Income_or_not)
 Inv_M_ratio <- dnorm(predictor) / pnorm(predictor)
@@ -136,27 +141,25 @@ ggplot(income_data) +
 # We can use the Tobit model to fix the censored problem.
 
 # (c)
-
 # Use the Tobit package to get a good initial par
-reg_tobit <- tobit(income ~ x2 + x3 + x4 + x5 + x6, left=-Inf,right = 100000)
+reg_tobit <- tobit(dat_A4$YINC_1700_2019 ~ x2 + x3 + x4 + x5 + x6, left=-Inf,right = 10000)
 summary(reg_tobit)
-initial_par <- as.vector(c(reg_tobit$coefficients))
-start <- initial_par + runif(7, -10, 10)
+initial_par <- as.vector(c(reg_tobit$coefficients,10))
+start <- initial_par #+ runif(7, -10, 10)
 
 # Set up data
 dat_A4 <- dat_A4 %>% 
   filter(dat_A4$YINC_1700_2019 != 0 & dat_A4$YINC_1700_2019 != 'NA') %>%
   mutate(censored = 1) 
-dat_A4$censored[which(dat_A4$YINC_1700_2019<100000)] <- 0
+dat_A4$censored[which(dat_A4$YINC_1700_2019 < 100000)] <- 0
 censored <- dat_A4$censored
 income <- dat_A4$YINC_1700_2019
 x1 = dat_A4$Intercept
 x2 = dat_A4$age
 x3 = dat_A4$work_exp
-x4 = dat_A4$education
+x4 = dat_A4$YSCH.3113_2019
 x5 = dat_A4$KEY_SEX_1997
 x6 = dat_A4$CV_MARSTAT_COLLAPSED_2019
-
 
 # This is the Tobit log-likelihood
 tobit_likelihood <- function(par,x1,x2,x3,x4,x5,x6,censored,income){
@@ -168,8 +171,22 @@ tobit_likelihood <- function(par,x1,x2,x3,x4,x5,x6,censored,income){
   return(-sum(like))
 }
 
-result <- optim(start,fn=tobit_likelihood,method="BFGS",control=list(trace=6,REPORT=1,maxit=1000),x1=x1,x2=x2,x3=x3,x4=x4,x5=x5,x6=x6,censored=censored,income=income,hessian=TRUE)
-result$par
+result2 <- optim(start,fn=tobit_likelihood,method="BFGS",control=list(trace=6,REPORT=1,maxit=1000),x1=NULL,x2=x2,x3=x3,x4=x4,x5=x5,x6=x6,censored=censored,income=income,hessian=TRUE)
+result2$par
+summary(reg_tobit)
+
+
+tobit_likelihood = function(par,x1,x2,x3,x4,x5,x6,censored,y){
+  yhat = par[1]*x1 + par[2]*x2 + par[3]*x3 + par[4]*x4 + par[5]*x5 + par[6]*x6
+  residual = y - yhat
+  standardization = (100000-yhat)/exp(par[7])
+  like = (1-censored)*log(dnorm(residual/exp(par[7]))/exp(par[7])) + censored*log(1 - pnorm(standardization))
+  return(-sum(like))
+}
+
+start_2 <- par + runif(7,-10,10)
+res_2 <- optim(start_2,fn=tobit_likelihood,method="BFGS",control=list(trace=6,REPORT=1,maxit=1000),x1=o_x1,x2=x2,x3=x3,x4=x4,x5=x5,x6=o_x6,censored=censored,y=y,hessian=TRUE)
+res_2$par
 summary(reg_tobit)
 
 # (d) 
@@ -195,37 +212,39 @@ dat_A4_long_panel <- long_panel(dat_A4_panel, prefix='_', begin  = 1997, end = 2
 dat_A4_long_panel <- as.data.frame(dat_A4_long_panel)
 dat_A4_long_panel <- dat_A4_long_panel %>%
   mutate(work_exp = rowSums(dat_A4_long_panel[,c(10:16,35:37)], na.rm = TRUE) / 48,
-         education = rowSums(dat_A4_long_panel[,19:21], na.rm=TRUE) / 4,
+         education = dat_A4_long_panel$CV_HIGHEST_DEGREE_EVER_EDT,
          marital_status = dat_A4_long_panel$CV_MARSTAT_COLLAPSED)
 
-#Between Estimator: gender/exper/edu/marital status
-between_estimate <- dat_A4_long_panel %>% 
+#Between Estimator: exper/edu/marital status
+estimate <- dat_A4_long_panel %>% 
   group_by(id) %>% 
-  summarize(income = mean(`YINC-1700`,na.rm = TRUE),
-            work_exp = mean(work_exp,na.rm = TRUE),
-            education = mean(CV_HIGHEST_DEGREE_EVER_EDT,na.rm = TRUE),
-            marital_status = mean(CV_MARSTAT_COLLAPSED,na.rm = TRUE))
-between_estimator <- lm(income ~ work_exp + education + marital_status, data = between_estimate)
+  mutate(m_income = mean(`YINC-1700`,na.rm = TRUE),
+         m_work_exp = mean(work_exp,na.rm = TRUE),
+         m_education = mean(education,na.rm = TRUE),
+         m_marital_status = mean(marital_status,na.rm = TRUE))
+
+between_estimator <- lm(m_income ~ m_work_exp + m_education + m_marital_status, data = estimate)
 summary(between_estimator)
 
 # Within Estimator: exper/edu/marital status
-within_estimate <- dat_A4_long_panel %>% 
-  mutate(difference_income = `YINC-1700` - ,
-         difference_education = CV_HIGHEST_DEGREE_EVER_EDT - ,
-         difference_work_exp = work_exp - ,
-         difference_marital_status = CV_MARSTAT_COLLAPSED - ,)
+estimate <- estimate %>% 
+  group_by(id) %>% 
+  mutate(diff_income = `YINC-1700` - m_income,
+         diff_education = education - m_education,
+         diff_work_exp = work_exp - m_work_exp,
+         diff_marital_status = marital_status - m_marital_status)
 
-dat_A4_long_panel$meanincome <- ave(dat_A4_long_panel$`YINC-1700`, dat_A4_long_panel$id, FUN=function(x)mean(x, na.rm=T))
-data$meanedu <- ave(data$CV_HIGHEST_DEGREE_EVER_EDT, data$id, FUN=function(x)mean(x, na.rm=T)) 
-data$meanexper <- ave(data$work_exp, data$id, FUN=function(x)mean(x, na.rm=T)) 
-data$meanms<- ave(data$CV_MARSTAT_COLLAPSED, data$id, FUN=function(x)mean(x, na.rm=T))
+within_estimator <- lm(diff_income ~ diff_education + diff_work_exp + diff_marital_status, data = estimate)
+summary(within_estimator)
 
-data$d_income <- data$`YINC-1700` - data$meanincome
-data$d_edu <- data$CV_HIGHEST_DEGREE_EVER_EDT - data$meanedu
-data$d_exper <- data$work_exp - data$meanexper
-data$d_ms <- data$CV_MARSTAT_COLLAPSED - data$meanms
-
-panel_within_estimator <- lm(data$d_income~ data$d_edu + data$d_exper + data$d_ms)
-summary(panel_within_estimator)
-# Difference estimator
+# Difference Estimator: exper/edu/marital status(first difference)
+estimate <- estimate %>% 
+  group_by(id) %>% 
+  mutate(first_diff_income = `YINC-1700` - lag(`YINC-1700`),
+         first_diff_education = education - lag(education),
+         first_diff_work_exp = work_exp - lag(work_exp),
+         first_diff_marital_status = marital_status - lag(marital_status))
+         
+difference_estimator <- lm(first_diff_income ~ first_diff_education + first_diff_work_exp + first_diff_marital_status, data = estimate)
+summary(difference_estimator)
 
