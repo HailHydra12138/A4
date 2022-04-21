@@ -176,19 +176,6 @@ result2$par
 summary(reg_tobit)
 
 
-tobit_likelihood = function(par,x1,x2,x3,x4,x5,x6,censored,y){
-  yhat = par[1]*x1 + par[2]*x2 + par[3]*x3 + par[4]*x4 + par[5]*x5 + par[6]*x6
-  residual = y - yhat
-  standardization = (100000-yhat)/exp(par[7])
-  like = (1-censored)*log(dnorm(residual/exp(par[7]))/exp(par[7])) + censored*log(1 - pnorm(standardization))
-  return(-sum(like))
-}
-
-start_2 <- par + runif(7,-10,10)
-res_2 <- optim(start_2,fn=tobit_likelihood,method="BFGS",control=list(trace=6,REPORT=1,maxit=1000),x1=o_x1,x2=x2,x3=x3,x4=x4,x5=x5,x6=o_x6,censored=censored,y=y,hessian=TRUE)
-res_2$par
-summary(reg_tobit)
-
 # (d) 
 # Exercise 4 Panel Data
 # Convert the panel data from wide to long
